@@ -4,3 +4,8 @@
 - Licht
 - print
 - banana
+
+```python3
+1=ded
+print(1)
+```
