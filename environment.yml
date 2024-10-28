@@ -1,0 +1,11 @@
+]name: health_app  # 環境名を設定
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - streamlit
+  - pandas
+  - requests
+  - matplotlib
+  - langchain
+  - ollama
