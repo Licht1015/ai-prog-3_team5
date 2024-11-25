@@ -4,6 +4,7 @@ import sqlite3
 from datetime import datetime
 import pandas as pd
 import matplotlib.pyplot as plt
+import plotly.express as px
 
 
 from langchain_community.chat_models import ChatOllama
@@ -116,22 +117,59 @@ def load_data():
     conn.close()
     return lifestyle_df, weather_df
 
-# Streamlitのインターフェース
+# グラフ表示関数を他の関数定義の前に追加
+def display_graphs():
+    lifestyle_df, weather_df = load_data()
+    
+    # デバッグ用の出力
+    st.write("データフレームの確認:")
+    st.write("Lifestyle DataFrame shape:", lifestyle_df.shape)
+    st.write("Weather DataFrame shape:", weather_df.shape)
+    
+    if not lifestyle_df.empty and not weather_df.empty:
+        # データを結合
+        df = pd.merge(lifestyle_df, weather_df, on='date')
+        
+        # 結合後のデータフレームを確認
+        st.write("結合後のDataFrame:")
+        st.write(df)
+        
+        try:
+            # 気圧と睡眠時間の関係
+            fig1 = px.scatter(df, x='pressure', y='sleep_hours', 
+                            title='気圧と睡眠時間の関係')
+            st.plotly_chart(fig1)
+            
+            # 気圧と運動時間の関係
+            fig2 = px.scatter(df, x='pressure', y='exercise_minutes', 
+                            title='気圧と運動時間の関係')
+            st.plotly_chart(fig2)
+            
+            # 気圧と食事の満足度の関係
+            fig3 = px.scatter(df, x='pressure', y='meal_quality', 
+                            title='気圧と食事の満足度の関係')
+            st.plotly_chart(fig3)
+            
+        except Exception as e:
+            st.error(f"グラフの作成中にエラーが発生しました: {str(e)}")
+    else:
+        st.write("グラフを表示するためのデータがありません。")
+
 def main():
     st.title("健康管理と気象条件アプリ")
     st.write("気圧と生活状況を照らし合わせて健康管理をサポートします。")
 
-    init_db()  # データベース初期化
+    init_db()
 
     # 場所の入力
-    city = st.text_input("場所を入力してください（例: Tokyo）")
+    city = st.text_input("場所を入力してください（例: Tokyo）", key="city_input")
 
     # 生活状況の入力
-    sleep_hours = st.slider("昨晩の睡眠時間（時間）", 0, 12, 7)
-    exercise_minutes = st.slider("運動時間（分）", 0, 180, 30)
-    meal_quality = st.selectbox("ご飯の量の満足度（1-5）", list(range(1, 6)))
+    sleep_hours = st.slider("昨晩の睡眠時間（時間）", 0, 12, 7, key="sleep_hours_slider")
+    exercise_minutes = st.slider("運動時間（分）", 0, 180, 30, key="exercise_minutes_slider")
+    meal_quality = st.selectbox("ご飯の量の満足度（1-5）", list(range(1, 6)), key="meal_quality_selectbox")
 
-    if st.button("データ保存"):
+    if st.button("データ保存", key="save_button"):
         if city:
             weather_info = get_weather_data(city)
             if weather_info:
@@ -143,84 +181,6 @@ def main():
                 advice = get_health_advice(weather_info, sleep_hours, exercise_minutes, meal_quality)
                 st.write("### 本日のアドバイス")
                 st.write(advice)
-
-    # データの表示
-    st.write("### 過去のデータ")
-    lifestyle_df, weather_df = load_data()
-    if not lifestyle_df.empty and not weather_df.empty:
-        st.write("生活データ")
-        st.dataframe(lifestyle_df)
-        st.write("気象データ")
-        st.dataframe(weather_df)
-    else:
-        st.write("まだデータがありません。")
-
-if __name__ == "__main__":
-    main()
-
-# データ取得関数を追加
-def load_lifestyle_and_weather_data():
-    conn = sqlite3.connect(DB_NAME)
-    lifestyle_df = pd.read_sql("SELECT * FROM lifestyle_data", conn)
-    weather_df = pd.read_sql("SELECT * FROM weather_data", conn)
-    conn.close()
-    return lifestyle_df, weather_df
-
-# グラフ表示用関数を追加
-def display_graphs():
-    st.write("### グラフ表示")
-    lifestyle_df, weather_df = load_lifestyle_and_weather_data()
-
-    # 生活データのグラフ
-    if not lifestyle_df.empty:
-        fig, ax = plt.subplots()
-        ax.plot(lifestyle_df['date'], lifestyle_df['sleep_hours'], marker='o', color='b', label='睡眠時間 (時間)')
-        ax.set_title("睡眠時間の推移")
-        ax.set_xlabel("日付")
-        ax.set_ylabel("time (h)")
-        ax.legend()
-        ax.grid(True)
-        plt.xticks(rotation=45)
-        st.pyplot(fig)
-    else:
-        st.write("生活データがまだありません。")
-
-    # 気象データのグラフ
-    if not weather_df.empty:
-        fig, ax = plt.subplots()
-        ax.plot(weather_df['date'], weather_df['pressure'], marker='x', color='r', label='気圧 (hPa)')
-        ax.set_title("気圧の推移")
-        ax.set_xlabel("日付")
-        ax.set_ylabel("atmospheric pressure (hPa)")
-        ax.legend()
-        ax.grid(True)
-        plt.xticks(rotation=45)
-        st.pyplot(fig)
-    else:
-        st.write("気象データがまだありません。")
-
-# main関数の修正
-def main():
-    st.title("健康管理と気象条件アプリ")
-    st.write("気圧と生活状況を照らし合わせて健康管理をサポートします。")
-
-    init_db()  # データベース初期化
-
-    # 場所の入力（固有のキーを設定）
-    city = st.text_input("場所を入力してください（例: Tokyo）", key="city_input")
-
-    # 生活状況の入力（固有のキーを設定）
-    sleep_hours = st.slider("昨晩の睡眠時間（時間）", 0, 12, 7, key="sleep_hours_slider")
-    exercise_minutes = st.slider("運動時間（分）", 0, 180, 30, key="exercise_minutes_slider")
-    meal_quality = st.selectbox("ご飯の量の満足度（1-5）", list(range(1, 6)), key="meal_quality_selectbox")
-
-    if st.button("データ保存", key="save_button"):
-        if city:
-            pressure = get_weather_data(city)
-            if pressure:
-                date = datetime.now().strftime("%Y-%m-%d")
-                save_data(date, sleep_hours, exercise_minutes, meal_quality, pressure)
-                st.success("データが保存されました！")
 
     # データの表示
     st.write("### 過去のデータ")
