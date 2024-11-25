@@ -38,16 +38,18 @@ def init_db():
                     sleep_hours REAL,
                     exercise_minutes REAL,
                     meal_quality INTEGER)''')
-    # 気象データ用テーブル
+    # 気象データ用テーブルの修正
+    # c.execute('''DROP TABLE IF EXISTS weather_data''')  # 既存のテーブルを削除
     c.execute('''
-                CREATE TABLE IF NOT EXISTS weather_data (
-                    date TEXT PRIMARY KEY,
-                    pressure REAL,
-                    temperature REAL,
-                    humidity REAL,
-                    weather_main TEXT,
-                    weather_description TEXT
-              )''')
+        CREATE TABLE IF NOT EXISTS weather_data (
+            date TEXT PRIMARY KEY,
+            pressure REAL,
+            temperature REAL,
+            humidity REAL,
+            weather_main TEXT,
+            weather_description TEXT
+        )''')
+    
     conn.commit()
     conn.close()
 
