@@ -1,3 +1,4 @@
 # Ignore the .streamlit folder
 
 .streamlit/
+.health_data.db

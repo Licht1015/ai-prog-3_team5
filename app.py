@@ -3,6 +3,9 @@ import requests
 import sqlite3
 from datetime import datetime
 import pandas as pd
+import matplotlib.pyplot as plt
+import plotly.express as px
+
 
 from langchain_community.chat_models import ChatOllama
 from langchain.callbacks.manager import CallbackManager
@@ -35,16 +38,18 @@ def init_db():
                     sleep_hours REAL,
                     exercise_minutes REAL,
                     meal_quality INTEGER)''')
-    # 気象データ用テーブル
+    # 気象データ用テーブルの修正
+    # c.execute('''DROP TABLE IF EXISTS weather_data''')  # 既存のテーブルを削除
     c.execute('''
-                CREATE TABLE IF NOT EXISTS weather_data (
-                    date TEXT PRIMARY KEY,
-                    pressure REAL,
-                    temperature REAL,
-                    humidity REAL,
-                    weather_main TEXT,
-                    weather_description TEXT
-              )''')
+        CREATE TABLE IF NOT EXISTS weather_data (
+            date TEXT PRIMARY KEY,
+            pressure REAL,
+            temperature REAL,
+            humidity REAL,
+            weather_main TEXT,
+            weather_description TEXT
+        )''')
+    
     conn.commit()
     conn.close()
 
@@ -106,7 +111,7 @@ def save_data(date, sleep_hours, exercise_minutes, meal_quality, weather_info):
     conn.commit()
     conn.close()
 
-# データ取得関数
+    # データ取得関数
 def load_data():
     conn = sqlite3.connect(DB_NAME)
     lifestyle_df = pd.read_sql("SELECT * FROM lifestyle_data", conn)
@@ -114,22 +119,59 @@ def load_data():
     conn.close()
     return lifestyle_df, weather_df
 
-# Streamlitのインターフェース
+# グラフ表示関数を他の関数定義の前に追加
+def display_graphs():
+    lifestyle_df, weather_df = load_data()
+    
+    # デバッグ用の出力
+    st.write("データフレームの確認:")
+    st.write("Lifestyle DataFrame shape:", lifestyle_df.shape)
+    st.write("Weather DataFrame shape:", weather_df.shape)
+    
+    if not lifestyle_df.empty and not weather_df.empty:
+        # データを結合
+        df = pd.merge(lifestyle_df, weather_df, on='date')
+        
+        # 結合後のデータフレームを確認
+        st.write("結合後のDataFrame:")
+        st.write(df)
+        
+        try:
+            # 気圧と睡眠時間の関係
+            fig1 = px.scatter(df, x='pressure', y='sleep_hours', 
+                            title='気圧と睡眠時間の関係')
+            st.plotly_chart(fig1)
+            
+            # 気圧と運動時間の関係
+            fig2 = px.scatter(df, x='pressure', y='exercise_minutes', 
+                            title='気圧と運動時間の関係')
+            st.plotly_chart(fig2)
+            
+            # 気圧と食事の満足度の関係
+            fig3 = px.scatter(df, x='pressure', y='meal_quality', 
+                            title='気圧と食事の満足度の関係')
+            st.plotly_chart(fig3)
+            
+        except Exception as e:
+            st.error(f"グラフの作成中にエラーが発生しました: {str(e)}")
+    else:
+        st.write("グラフを表示するためのデータがありません。")
+
 def main():
     st.title("健康管理と気象条件アプリ")
     st.write("気圧と生活状況を照らし合わせて健康管理をサポートします。")
 
-    init_db()  # データベース初期化
+    init_db()
 
     # 場所の入力
-    city = st.text_input("場所を入力してください（例: Tokyo）")
+    city = st.text_input("場所を入力してください（例: Tokyo）", key="city_input")
 
     # 生活状況の入力
-    sleep_hours = st.slider("昨晩の睡眠時間（時間）", 0, 12, 7)
-    exercise_minutes = st.slider("運動時間（分）", 0, 180, 30)
-    meal_quality = st.selectbox("ご飯の量の満足度（1-5）", list(range(1, 6)))
+    sleep_hours = st.slider("昨晩の睡眠時間（時間）", 0, 12, 7, key="sleep_hours_slider")
+    exercise_minutes = st.slider("運動時間（分）", 0, 180, 30, key="exercise_minutes_slider")
+    meal_quality = st.selectbox("ご飯の量の満足度（1-5）", list(range(1, 6)), key="meal_quality_selectbox")
 
-    if st.button("データ保存"):
+    if st.button("データ保存", key="save_button"):
         if city:
             weather_info = get_weather_data(city)
             if weather_info:
@@ -153,5 +195,9 @@ def main():
     else:
         st.write("まだデータがありません。")
 
+    # グラフの表示
+    display_graphs()
+
 if __name__ == "__main__":
     main()
+
