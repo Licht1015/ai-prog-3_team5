@@ -2,3 +2,6 @@
 
 .streamlit/
 .health_data.db
+myenv/
+git rm -r --cached myenv/
+git commit -m "Remove virtual environment from repository"
