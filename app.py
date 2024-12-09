@@ -17,6 +17,13 @@ from langchain_core.documents import Document
 import requests
 import os
 
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Hello, Flask:)"
 
 # Ollamaのチャットモデルの初期化
 chat_model = ChatOllama(
