@@ -1,3 +1,4 @@
+# Required imports
 import streamlit as st
 import requests
 import sqlite3
@@ -57,6 +58,14 @@ def init_db():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )''')
     
+    # 目標管理用テーブル
+    c.execute('''CREATE TABLE IF NOT EXISTS health_goals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sleep_goal REAL,
+                    exercise_goal REAL,
+                    meal_quality_goal INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+    
     # locations テーブルの移行処理
     if 'locations' in existing_tables:
         c.execute("PRAGMA table_info(locations)")
@@ -87,6 +96,24 @@ def init_db():
     
     conn.commit()
     conn.close()
+
+def save_goals(sleep_goal, exercise_goal, meal_quality_goal):
+    """健康目標を保存"""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("INSERT INTO health_goals (sleep_goal, exercise_goal, meal_quality_goal) VALUES (?, ?, ?)",
+              (sleep_goal, exercise_goal, meal_quality_goal))
+    conn.commit()
+    conn.close()
+
+def get_current_goals():
+    """最新の健康目標を取得"""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT * FROM health_goals ORDER BY id DESC LIMIT 1")
+    result = c.fetchone()
+    conn.close()
+    return result[1:4] if result else (8.0, 30.0, 4)  # デフォルト値を設定
 
 def get_weather_data(city):
     url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={API_KEY}&units=metric"
@@ -134,6 +161,8 @@ def get_latest_advice():
     return result if result else (None, None)
 
 def get_health_advice(weather_info, sleep_hours, exercise_minutes, meal_quality):
+    sleep_goal, exercise_goal, meal_quality_goal = get_current_goals()
+    
     prompt = f"""
     以下の情報から、50文字程度の簡潔な健康アドバイスを1つだけ提供してください。
     特に注意が必要な項目についてのみ言及してください。
@@ -141,7 +170,9 @@ def get_health_advice(weather_info, sleep_hours, exercise_minutes, meal_quality)
     条件：
     気温{weather_info['temp']}℃、気圧{weather_info['pressure']}hPa、湿度{weather_info['humidity']}%
     天気：{weather_info['weather_main']}
-    睡眠{sleep_hours}時間、運動{exercise_minutes}分、食事満足度{meal_quality}/5
+    睡眠{sleep_hours}時間（目標{sleep_goal}時間）
+    運動{exercise_minutes}分（目標{exercise_goal}分）
+    食事満足度{meal_quality}/5（目標{meal_quality_goal}/5）
 
     形式：
     - 一文で簡潔に
@@ -192,10 +223,124 @@ def update_location_selection(city_name, is_selected):
     conn.commit()
     conn.close()
 
+def display_goal_progress(current_data, goals):
+    """目標達成度を表示"""
+    st.write("### 目標達成状況")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        sleep_progress = (float(current_data['sleep_hours']) / goals[0]) * 100
+        sleep_delta = float(current_data['sleep_hours']) - float(goals[0])
+        st.metric("睡眠時間達成度", f"{sleep_progress:.1f}%",
+                 delta=f"{sleep_delta:.1f}時間")
+    
+    with col2:
+        exercise_progress = (float(current_data['exercise_minutes']) / goals[1]) * 100
+        exercise_delta = float(current_data['exercise_minutes']) - float(goals[1])
+        st.metric("運動時間達成度", f"{exercise_progress:.1f}%",
+                 delta=f"{exercise_delta:.1f}分")
+    
+    with col3:
+        meal_progress = (float(current_data['meal_quality']) / goals[2]) * 100
+        meal_delta = float(current_data['meal_quality']) - float(goals[2])
+        st.metric("食事品質達成度", f"{meal_progress:.1f}%",
+                 delta=f"{meal_delta:.1f}")
+
+def calculate_weekly_trends(df):
+    """週間トレンドを計算"""
+    # 日付を変換
+    df = df.copy()
+    df['date'] = pd.to_datetime(df['date'])
+    
+    # 数値列のみを選択
+    numeric_columns = df.select_dtypes(include=['int64', 'float64']).columns
+    df_numeric = df[['date'] + list(numeric_columns)]
+    
+    # 週次平均を計算
+    weekly_avg = df_numeric.set_index('date').resample('W').mean()
+    
+    return weekly_avg
+
+def detect_anomalies(df, column, threshold=2):
+    """異常値を検出"""
+    mean = df[column].mean()
+    std = df[column].std()
+    anomalies = df[abs(df[column] - mean) > threshold * std]
+    return anomalies
+
+def analyze_seasonal_patterns(df):
+    """季節性パターンを分析"""
+    df['date'] = pd.to_datetime(df['date'])
+    df['season'] = df['date'].dt.month.map({12: 'Winter', 1: 'Winter', 2: 'Winter',
+                                           3: 'Spring', 4: 'Spring', 5: 'Spring',
+                                           6: 'Summer', 7: 'Summer', 8: 'Summer',
+                                           9: 'Fall', 10: 'Fall', 11: 'Fall'})
+    seasonal_stats = df.groupby('season').agg({
+        'sleep_hours': 'mean',
+        'exercise_minutes': 'mean',
+        'meal_quality': 'mean'
+    })
+    return seasonal_stats
+
+def display_enhanced_visualizations(lifestyle_df, weather_df):
+    """拡張データ可視化"""
+    if not lifestyle_df.empty and not weather_df.empty:
+        df = pd.merge(lifestyle_df, weather_df, on='date')
+        
+        st.write("### 詳細分析")
+        
+        # トレンド分析
+        trends_tab, patterns_tab, anomalies_tab = st.tabs(["トレンド", "パターン", "異常値"])
+        
+        with trends_tab:
+            weekly_trends = calculate_weekly_trends(df)
+            fig = px.line(weekly_trends,
+                         y=['sleep_hours', 'exercise_minutes', 'meal_quality', 'temperature', 'pressure', 'humidity'],
+                         title="週間トレンド")
+            fig.update_layout(
+                xaxis_title="日付",
+                yaxis_title="値",
+                legend_title="指標"
+            )
+            st.plotly_chart(fig)
+            
+            # データの説明を追加
+            st.write("""
+            #### トレンドの見方
+            - 睡眠時間: 時間単位
+            - 運動時間: 分単位
+            - 食事満足度: 1-5の評価
+            - 気温: 摂氏（℃）
+            - 気圧: hPa
+            - 湿度: %
+            """)
+        
+        with patterns_tab:
+            seasonal_patterns = analyze_seasonal_patterns(df)
+            fig = px.bar(seasonal_patterns,
+                        barmode='group',
+                        title="季節別統計")
+            st.plotly_chart(fig)
+            
+            # 気象条件との相関
+            correlation_matrix = df[['sleep_hours', 'exercise_minutes', 'meal_quality',
+                                   'pressure', 'temperature', 'humidity']].corr()
+            fig = px.imshow(correlation_matrix,
+                           title="相関ヒートマップ",
+                           color_continuous_scale='RdBu')
+            st.plotly_chart(fig)
+        
+        with anomalies_tab:
+            cols = ['sleep_hours', 'exercise_minutes', 'meal_quality']
+            for col in cols:
+                anomalies = detect_anomalies(df, col)
+                if not anomalies.empty:
+                    st.write(f"#### {col}の異常値")
+                    st.dataframe(anomalies[['date', col]])
+
 def train_linear_regression(X, y):
-    """
-    線形回帰モデルを学習し、モデルとメトリクスを返す
-    """
+    """線形回帰モデルを学習し、モデルとメトリクスを返す"""
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     model = LinearRegression()
     model.fit(X_train, y_train)
@@ -207,79 +352,22 @@ def train_linear_regression(X, y):
     return model, r2, rmse
 
 def prepare_prediction_data(df):
-    """
-    予測のためのデータ前処理を行う
-    """
-    df['date_ordinal'] = pd.to_datetime(df['date']).map(datetime.toordinal)
+    """予測のためのデータ前処理を行う"""
+    df['date'] = pd.to_datetime(df['date'])
+    df['date_ordinal'] = df['date'].map(datetime.toordinal)
     weather_dummies = pd.get_dummies(df['weather_main'], prefix='weather')
     features = ['pressure', 'temperature', 'humidity', 'date_ordinal']
     X = pd.concat([df[features], weather_dummies], axis=1)
     return X
 
 def display_prediction_metrics(target_name, r2, rmse):
-    """
-    予測メトリクスを表示
-    """
+    """予測メトリクスを表示"""
     st.write(f"#### {target_name} 予測モデルの性能")
     col1, col2 = st.columns(2)
     with col1:
         st.metric("決定係数 (R²)", f"{r2:.3f}")
     with col2:
         st.metric("平均二乗誤差の平方根 (RMSE)", f"{rmse:.3f}")
-
-def display_graphs():
-    lifestyle_df, weather_df = load_data()
-    if not lifestyle_df.empty and not weather_df.empty:
-        df = pd.merge(lifestyle_df, weather_df, on='date')
-        
-        # 基本的な散布図の表示
-        st.write("### 基本的な関係性の可視化")
-        fig1 = px.scatter(df, x='pressure', y='sleep_hours', title='気圧と睡眠時間の関係')
-        st.plotly_chart(fig1)
-        fig2 = px.scatter(df, x='pressure', y='exercise_minutes', title='気圧と運動時間の関係')
-        st.plotly_chart(fig2)
-        fig3 = px.scatter(df, x='pressure', y='meal_quality', title='気圧と食事の満足度の関係')
-        st.plotly_chart(fig3)
-        
-        # 予測モデリングセクション
-        st.write("### 予測モデリング")
-        if len(df) >= 10:
-            if st.button("予測モデルを作成"):
-                with st.spinner("予測モデルを作成中..."):
-                    X = prepare_prediction_data(df)
-                    
-                    targets = {
-                        '睡眠時間': 'sleep_hours',
-                        '運動時間': 'exercise_minutes',
-                        '食事満足度': 'meal_quality'
-                    }
-                    
-                    for target_name, target_col in targets.items():
-                        model, r2, rmse = train_linear_regression(X, df[target_col])
-                        display_prediction_metrics(target_name, r2, rmse)
-                        
-                        # 特徴量の重要度を表示
-                        st.write(f"#### {target_name}に影響を与える要因")
-                        importance_df = pd.DataFrame({
-                            '要因': X.columns,
-                            '影響度': model.coef_
-                        }).sort_values('影響度', key=abs, ascending=False)
-                        st.dataframe(importance_df)
-                        
-                        # 予測vs実際の値のプロット
-                        fig = px.scatter(df, x=target_col, y=model.predict(X),
-                                       labels={'x': f'実際の{target_name}', 'y': f'予測された{target_name}'},
-                                       title=f'{target_name}の予測vs実際の値')
-                        fig.add_scatter(x=[df[target_col].min(), df[target_col].max()],
-                                      y=[df[target_col].min(), df[target_col].max()],
-                                      mode='lines', name='完璧な予測', line=dict(dash='dash'))
-                        st.plotly_chart(fig)
-                
-                st.success("予測モデルの作成が完了しました！")
-        else:
-            st.warning("予測モデルを作成するには、最低10件以上のデータが必要です。")
-    else:
-        st.write("グラフを表示するためのデータがありません。")
 
 def main():
     st.title("健康管理と気象条件アプリ")
@@ -288,7 +376,7 @@ def main():
 
     tab = st.sidebar.radio(
         "機能を選択",
-        ["ホーム", "データ入力・保存", "アドバイス取得", "データ閲覧・分析"]
+        ["ホーム", "データ入力・保存", "アドバイス取得", "データ閲覧・分析", "目標設定"]
     )
 
     with st.sidebar:
@@ -303,7 +391,7 @@ def main():
                     conn.commit()
                     st.success(f"{new_city} を登録しました！")
                 except Exception as e:
-                    st.error(f"登録中にエラーが発生しました: {e}")
+                    st.error(f"登録中に���ラーが発生しました: {e}")
                 finally:
                     conn.close()
 
@@ -349,6 +437,13 @@ def main():
                         if weather_info:
                             st.markdown("---")
                             display_weather_info(selected_locations[i + 1], weather_info)
+            
+            # 目標達成状況の表示
+            st.markdown("---")
+            lifestyle_df, _ = load_data()
+            if not lifestyle_df.empty:
+                current_data = lifestyle_df.iloc[-1]
+                display_goal_progress(current_data, get_current_goals())
             
             # 今日のアドバイスを表示
             st.markdown("---")
@@ -497,14 +592,14 @@ def main():
         else:
             st.warning("アドバイスを取得するには、まずデータを入力・保存してください。")
 
-    else:  # データ閲覧・分析
+    elif tab == "データ閲覧・分析":
         st.write("### データ閲覧")
         lifestyle_df, weather_df = load_data()
         if not lifestyle_df.empty and not weather_df.empty:
             # データ表示タブ
             view_tab = st.radio(
                 "表示するデータを選択",
-                ["生活データ", "気象データ", "分析と予測"]
+                ["生活データ", "気象データ", "分析と予測", "詳細分析"]
             )
             
             if view_tab == "生活データ":
@@ -539,11 +634,114 @@ def main():
                     file_name='weather_data.csv',
                     mime='text/csv',
                 )
-            else:  # 分析と予測
+            elif view_tab == "分析と予測":
                 st.write("### データ分析と予測")
-                display_graphs()
+                if len(lifestyle_df) >= 10:
+                    if st.button("予測モデルを作成"):
+                        with st.spinner("予測モデルを作成中..."):
+                            df = pd.merge(lifestyle_df, weather_df, on='date')
+                            X = prepare_prediction_data(df)
+                            
+                            targets = {
+                                '睡眠時間': 'sleep_hours',
+                                '運動時間': 'exercise_minutes',
+                                '食事満足度': 'meal_quality'
+                            }
+                            
+                            for target_name, target_col in targets.items():
+                                model, r2, rmse = train_linear_regression(X, df[target_col])
+                                display_prediction_metrics(target_name, r2, rmse)
+                                
+                                # 特徴量の重要度を表示
+                                st.write(f"#### {target_name}に影響を与える要因")
+                                importance_df = pd.DataFrame({
+                                    '要因': X.columns,
+                                    '影響度': model.coef_
+                                }).sort_values('影響度', key=abs, ascending=False)
+                                st.dataframe(importance_df)
+                                
+                                # 予測vs実際の値のプロット
+                                fig = px.scatter(df, x=target_col, y=model.predict(X),
+                                               labels={'x': f'実際の{target_name}', 'y': f'予測された{target_name}'},
+                                               title=f'{target_name}の予測vs実際の値')
+                                fig.add_scatter(x=[df[target_col].min(), df[target_col].max()],
+                                               y=[df[target_col].min(), df[target_col].max()],
+                                               line=dict(dash='dash'),
+                                               name='完璧な予測')
+                                st.plotly_chart(fig)
+                        
+                        st.success("予測モデルの作成が完了しました！")
+                else:
+                    st.warning("予測モデルを作成するには、最低10件以上のデータが必要です。")
+            else:  # 詳細分析
+                display_enhanced_visualizations(lifestyle_df, weather_df)
         else:
             st.write("まだデータがありません。")
+
+    elif tab == "目標設定":
+        st.write("### 健康目標の設定")
+        current_goals = get_current_goals()
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            new_sleep_goal = st.number_input(
+                "目標睡眠時間（時間）",
+                min_value=4.0,
+                max_value=12.0,
+                value=float(current_goals[0]),
+                step=0.5
+            )
+        
+        with col2:
+            new_exercise_goal = st.number_input(
+                "目標運動時間（分）",
+                min_value=0,
+                max_value=180,
+                value=int(current_goals[1]),
+                step=5
+            )
+        
+        with col3:
+            new_meal_quality_goal = st.number_input(
+                "目標食事満足度（1-5）",
+                min_value=1,
+                max_value=5,
+                value=int(current_goals[2]),
+                step=1
+            )
+        
+        if st.button("目標を更新"):
+            save_goals(new_sleep_goal, new_exercise_goal, new_meal_quality_goal)
+            st.success("健康目標が更新されました！")
+            
+            # 最新のデータで目標達成状況を表示
+            lifestyle_df, _ = load_data()
+            if not lifestyle_df.empty:
+                current_data = lifestyle_df.iloc[-1]
+                display_goal_progress(current_data, (new_sleep_goal, new_exercise_goal, new_meal_quality_goal))
+        
+        # 目標設定のガイドライン
+        with st.expander("目標設定のガイドライン"):
+            st.write("""
+            #### 健康的な目標設定のためのガイドライン
+            
+            1. **睡眠時間**
+                - 成人の推奨睡眠時間は7-9時間
+                - 個人差があるため、自身の生活リズムに合わせて調整
+            
+            2. **運動時間**
+                - WHO推奨：週150分の中程度の有酸素運動
+                - 1日あたり20-30分が目安
+                - 激��い運動の場合は時間を短縮可能
+            
+            3. **食事の質**
+                - バランスの取れた食事を目指す
+                - 規則正しい食事時間
+                - 適切な量と質を維持
+            
+            目標は定期的に見直し、必要に応じて調整することをお勧めします。
+            """)
 
 if __name__ == "__main__":
     main()
