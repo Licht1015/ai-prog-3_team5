@@ -13,6 +13,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score, mean_squared_error
 import numpy as np
+from googletrans import Translator
 
 # Ollamaのチャットモデルの初期化
 chat_model = ChatOllama(
@@ -160,30 +161,47 @@ def get_latest_advice():
     conn.close()
     return result if result else (None, None)
 
+def translate_to_japanese(text):
+    """英語のテキストを日本語に翻訳"""
+    try:
+        translator = Translator()
+        translation = translator.translate(text, dest='ja')
+        return translation.text
+    except Exception as e:
+        st.error(f"翻訳エラー: {str(e)}")
+        return text
+
 def get_health_advice(weather_info, sleep_hours, exercise_minutes, meal_quality):
     sleep_goal, exercise_goal, meal_quality_goal = get_current_goals()
     
     prompt = f"""
-    以下の情報から、50文字程度の簡潔な健康アドバイスを1つだけ提供してください。
-    特に注意が必要な項目についてのみ言及してください。
+    Based on the following information, provide a concise health advice in about 50 words.
+    Only mention items that need attention.
 
-    条件：
-    気温{weather_info['temp']}℃、気圧{weather_info['pressure']}hPa、湿度{weather_info['humidity']}%
-    天気：{weather_info['weather_main']}
-    睡眠{sleep_hours}時間（目標{sleep_goal}時間）
-    運動{exercise_minutes}分（目標{exercise_goal}分）
-    食事満足度{meal_quality}/5（目標{meal_quality_goal}/5）
+    Conditions:
+    Temperature: {weather_info['temp']}°C
+    Pressure: {weather_info['pressure']}hPa
+    Humidity: {weather_info['humidity']}%
+    Weather: {weather_info['weather_main']}
+    Sleep: {sleep_hours} hours (goal: {sleep_goal} hours)
+    Exercise: {exercise_minutes} minutes (goal: {exercise_goal} minutes)
+    Meal satisfaction: {meal_quality}/5 (goal: {meal_quality_goal}/5)
 
-    形式：
-    - 一文で簡潔に
-    - 具体的な行動を提案
-    - 理由は短く
+    Format:
+    - One concise sentence
+    - Suggest specific action
+    - Brief reason
     """
 
     response = chat_model.invoke([HumanMessage(content=prompt)])
+    advice = response.content
+    
+    # 英語のアドバイスを日本語に翻訳
+    japanese_advice = translate_to_japanese(advice)
+    
     today = datetime.now().strftime("%Y-%m-%d")
-    save_advice(today, response.content)
-    return response.content
+    save_advice(today, japanese_advice)
+    return japanese_advice
 
 def save_data(date, sleep_hours, exercise_minutes, meal_quality, weather_info):
     conn = sqlite3.connect(DB_NAME)
@@ -248,7 +266,7 @@ def display_goal_progress(current_data, goals):
                  delta=f"{meal_delta:.1f}")
 
 def calculate_weekly_trends(df):
-    """週間トレンドを計算"""
+    """��間トレンドを計算"""
     # 日付を変換
     df = df.copy()
     df['date'] = pd.to_datetime(df['date'])
@@ -391,7 +409,7 @@ def main():
                     conn.commit()
                     st.success(f"{new_city} を登録しました！")
                 except Exception as e:
-                    st.error(f"登録中に���ラーが発生しました: {e}")
+                    st.error(f"登録中にエラーが発生しました: {e}")
                 finally:
                     conn.close()
 
@@ -733,7 +751,7 @@ def main():
             2. **運動時間**
                 - WHO推奨：週150分の中程度の有酸素運動
                 - 1日あたり20-30分が目安
-                - 激��い運動の場合は時間を短縮可能
+                - 激い運動の場合は時間を短縮可能
             
             3. **食事の質**
                 - バランスの取れた食事を目指す
