@@ -1,5 +1,4 @@
 # Ignore the .streamlit folder
 
 .streamlit/
-.health_data.db
-.insert_sample_data.py
+.health_data.db/
